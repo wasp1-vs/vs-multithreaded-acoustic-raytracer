@@ -1,0 +1,11 @@
+[project]
+name = "python-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "numpy>=2.4.4",
+    "scipy>=1.17.1",
+    "soundfile>=0.13.1",
+]

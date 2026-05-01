@@ -3,6 +3,8 @@ use rand::RngExt;
 use serde::Serialize;
 use std::f32::consts::PI;
 use std::fs::File;
+use rayon::prelude::*;
+use std::time::Instant;
 
 #[derive(Serialize)]
 struct OutputMetadata {
@@ -73,14 +75,14 @@ fn check_mic_intersection(
     let segment = end - start;
     let segment_length_sq = segment.length_squared();
 
-    if segment_length_sq == 0.0 { // if ray didnt move at all
+    if segment_length_sq == 0.0 {       // if ray didnt move at all
         return start.distance(mic_center) <= mic_radius;
     }
-    let to_mic = mic_center - start; // Vector pointing from start of the ray to the microphone
-    let t = to_mic.dot(segment) / segment_length_sq; // Vector Projection
-    let clamped_t = t.clamp(0.0, 1.0); // Only the segment not the inf line
-    let closest_point = start + (segment * clamped_t); // Coordinates of the closes point on the segment
-    closest_point.distance(mic_center) <= mic_radius // Is the closes point inside the circle?
+    let to_mic = mic_center - start;                     // Vector pointing from start of the ray to the microphone
+    let t = to_mic.dot(segment) / segment_length_sq;      // Vector Projection
+    let clamped_t = t.clamp(0.0, 1.0);          // Only the segment not the inf line
+    let closest_point = start + (segment * clamped_t);  // Coordinates of the closes point on the segment
+    closest_point.distance(mic_center) <= mic_radius          // Is the closes point inside the circle?
 
 }
 
@@ -102,7 +104,7 @@ fn cast_ray(ray: &Ray, walls: &Vec<Wall>) -> Option<(Ray, f32)> {
 }
 
 fn generate_initial_ray(config: &SimulationConfig) -> Ray {
-    let mut rng = rand::rng();
+    let mut rng = rand::rng();  // Omnidirectional, random rays
     let random_angle: f32 = rng.random_range(0.0..(2.0 * PI));
     let direction = Vec2::new(random_angle.cos(), random_angle.sin());
     Ray {
@@ -110,11 +112,17 @@ fn generate_initial_ray(config: &SimulationConfig) -> Ray {
         direction,
     }
 }
-fn simulate_single_ray(initial_ray:Ray, walls: &Vec<Wall>, config: &SimulationConfig) -> Vec<(f32, f32)> {
+fn simulate_single_ray(
+    initial_ray:Ray,
+    walls: &Vec<Wall>,
+    config: &SimulationConfig,
+    ray_hits: &mut Vec<(f32,f32)>
+) {
+    ray_hits.clear();
     let mut current_ray = initial_ray;
     let mut total_distance = 0.0;
     let mut current_pressure = 1.0;
-    let mut ray_hits: Vec<(f32, f32)> = Vec::new();
+    //let mut ray_hits: Vec<(f32, f32)> = Vec::new();
 
 
     for _bounce in 0..config.max_bounces {
@@ -131,15 +139,15 @@ fn simulate_single_ray(initial_ray:Ray, walls: &Vec<Wall>, config: &SimulationCo
             if check_mic_intersection(start_point,end_point,config.mic_position,config.mic_radius) {
                 let distance_to_mic = start_point.distance(config.mic_position);
                 let total_distance_at_hit = total_distance + distance_to_mic;
-                let delay_seconds = total_distance_at_hit / 343.0; // meters per second
-                ray_hits.push((delay_seconds, current_pressure));
+                //let delay_seconds = total_distance_at_hit / 343.0; // meters per second
+                ray_hits.push((total_distance_at_hit / 343.0, current_pressure));
             }
 
             current_ray = bounced_ray;
 
         } else { break; }
     }
-    ray_hits
+    //ray_hits
 }
 fn export_results(delays: Vec<f32>, pressure: Vec<f32>,config: &SimulationConfig) {
 
@@ -159,19 +167,56 @@ fn export_results(delays: Vec<f32>, pressure: Vec<f32>,config: &SimulationConfig
     serde_json::to_writer_pretty(file, &final_data).expect("Unable to write JSON");
     println!("Simulation done! Wrote {} hits to ir_output.json", final_data.metadata.rays_received);
 }
-
-fn run_simulation(config: &SimulationConfig, walls: &Vec<Wall>) {
-    let mut delays_array: Vec<f32> = Vec::new();
-    let mut pressures_array: Vec<f32> = Vec::new();
+// Single thread logic
+fn run_simulation_single(config: &SimulationConfig, walls: &Vec<Wall>) -> (Vec<f32>, Vec<f32>) {
+    let mut delays_singular = Vec::with_capacity(100_000);
+    let mut pressures_singular = Vec::with_capacity(100_000);
+    let mut temp_ray_buffer = Vec::with_capacity(100);
     for _ in 0..config.rays_to_cast {
         let current_ray = generate_initial_ray(config);
-        let ray_hits = simulate_single_ray(current_ray, walls, config);
-        for (delay,pressure) in ray_hits {
-            delays_array.push(delay);
-            pressures_array.push(pressure);
+        simulate_single_ray(current_ray, walls, config, &mut temp_ray_buffer);
+        for (delay,pressure) in &temp_ray_buffer {
+            delays_singular.push(*delay);
+            pressures_singular.push(*pressure);
         }
     }
-    export_results(delays_array,pressures_array,config);
+    (delays_singular, pressures_singular)
+    //export_results(delays_array,pressures_array,config);
+
+}
+fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> (Vec<f32>, Vec<f32>) {
+    println!("starting execution");
+    let(delays_par, pressures_par, _) = (0..config.rays_to_cast)
+        .into_par_iter()
+        .fold( || {
+            let local_delays = Vec::with_capacity(100_000);
+            let local_pressures = Vec::with_capacity(100_000);
+            let temp_ray_buffer = Vec::with_capacity(100);
+
+            (local_delays,local_pressures,temp_ray_buffer)
+            //let current_ray = generate_initial_ray(config);
+            //simulate_single_ray(current_ray,walls,config)
+        },
+            |mut thread_buckets, _| {
+                let fresh_ray = generate_initial_ray(config);
+                simulate_single_ray(fresh_ray,walls,config,&mut thread_buckets.2); // passing temp buffer to not allocate new memory
+                for(delay, pressure) in &thread_buckets.2 {
+                    thread_buckets.0.push(*delay);
+                    thread_buckets.1.push(*pressure);
+                }
+                thread_buckets
+
+            }
+        ).reduce( // Merge threadbuckets into one final list
+        || (Vec::new(),Vec::new(),Vec::new()),
+        |mut a, mut b| {
+            a.0.append(&mut b.0);
+            a.1.append(&mut b.1);
+            a
+
+        }
+    );
+    (delays_par, pressures_par)
 }
 
 fn main() {
@@ -201,12 +246,27 @@ fn main() {
     };
     let room: Vec<Wall> = vec![test_wall1, test_wall2, test_wall3, test_wall4];
     let test_config = SimulationConfig {
-        max_bounces: 32,
+        max_bounces: 320,
         min_pressure: 0.001,
         mic_radius: 1.5,
         mic_position:Vec2::new(5.0,5.0),
-        rays_to_cast: 100,
+        rays_to_cast: 100000,
         speaker_position:Vec2::new(2.0,2.0),
     };
-    run_simulation(&test_config, &room);
+    println!("Starting single simulation");
+    let start_single = Instant::now();
+    let(delays_single, pressures_single) = run_simulation_single(&test_config, &room);
+    let duration_singe = start_single.elapsed().as_secs_f32();
+    println!("Simulation run time: {} s", duration_singe);
+
+    println!("Starting parallel simulation");
+    let start_parallel = Instant::now();
+    let(delays_par, pressures_par) = run_simulation_parallel(&test_config, &room);
+    let duration_parallel = start_parallel.elapsed().as_secs_f32();
+    println!("Simulation run time: {} s", duration_parallel);
+
+    let speedup = duration_singe / duration_parallel;
+    println!("\nSpeedup time: {:.2}x s", speedup);
+
+    export_results(delays_par, pressures_par, &test_config);
 }

@@ -2,9 +2,11 @@ use std::f32::consts::PI;
 use glam::Vec2;
 use rand::RngExt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use serde::Deserialize;
 use crate::geometry;
 use crate::geometry::{Ray, Wall};
 
+#[derive(Deserialize)]
 pub struct SimulationConfig {
     pub max_bounces: u32,
     pub min_pressure: f32,
@@ -34,7 +36,6 @@ fn simulate_single_ray(
     let mut current_ray = initial_ray;
     let mut total_distance = 0.0;
     let mut current_pressure = 1.0;
-    //let mut ray_hits: Vec<(f32, f32)> = Vec::new();
 
 
     for _bounce in 0..config.max_bounces {
@@ -51,15 +52,13 @@ fn simulate_single_ray(
             if geometry::check_mic_intersection(start_point, end_point, config.mic_position, config.mic_radius) {
                 let distance_to_mic = start_point.distance(config.mic_position);
                 let total_distance_at_hit = total_distance + distance_to_mic;
-                //let delay_seconds = total_distance_at_hit / 343.0; // meters per second
-                ray_hits.push((total_distance_at_hit / 343.0, current_pressure));
+                ray_hits.push((total_distance_at_hit / 343.0, current_pressure)); // meter / sec
             }
 
             current_ray = bounced_ray;
 
         } else { break; }
     }
-    //ray_hits
 }
 
 // Single thread logic
@@ -76,8 +75,6 @@ pub fn run_simulation_single(config: &SimulationConfig, walls: &Vec<Wall>) -> (V
         }
     }
     (delays_singular, pressures_singular)
-    //export_results(delays_array,pressures_array,config);
-
 }
 
 pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> (Vec<f32>, Vec<f32>) {
@@ -90,8 +87,6 @@ pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> 
             let temp_ray_buffer = Vec::with_capacity(100);
 
             (local_delays,local_pressures,temp_ray_buffer)
-            //let current_ray = generate_initial_ray(config);
-            //simulate_single_ray(current_ray,walls,config)
         },
             |mut thread_buckets, _| {
                 let fresh_ray = generate_initial_ray(config);
@@ -101,7 +96,6 @@ pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> 
                     thread_buckets.1.push(*pressure);
                 }
                 thread_buckets
-
             }
         ).reduce( // Merge threadbuckets into one final list
         || (Vec::new(),Vec::new(),Vec::new()),
@@ -109,7 +103,6 @@ pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> 
             a.0.append(&mut b.0);
             a.1.append(&mut b.1);
             a
-
         }
     );
     (delays_par, pressures_par)

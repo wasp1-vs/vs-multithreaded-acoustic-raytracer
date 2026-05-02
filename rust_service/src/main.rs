@@ -2,16 +2,25 @@ mod geometry;
 mod simulation;
 mod export;
 
+use clap::Parser;
+use geometry::Wall;
 use glam::Vec2;
-use std::time::Instant;
-use geometry::{Ray, Wall};
 use simulation::SimulationConfig;
+use std::fs;
+use std::time::Instant;
 
+
+#[derive(Parser)]
+#[command(name = "Acoustic Engine")]
+#[command(about = "Multithreaded acoustic raytracer", long_about = None)]
+/// usage: cargo run --release -- --config-file (input_config.json)
+struct Cli {
+    /// Path to the JSON config file
+    #[arg(short, long, default_value = "input_config.json")]
+    config_file: String,
+}
 fn main() {
-    let _test_ray = Ray {
-        origin: Vec2::new(2.0,2.0),
-        direction: Vec2::new(1.0,0.5).normalize(),
-    };
+    
     let test_wall1 = Wall {
         start:Vec2::new(10.0,0.0),
         end:Vec2::new(10.0,10.0),
@@ -33,17 +42,17 @@ fn main() {
         absorption: 0.1
     };
     let room: Vec<Wall> = vec![test_wall1, test_wall2, test_wall3, test_wall4];
-    let test_config = SimulationConfig {
-        max_bounces: 320,
-        min_pressure: 0.001,
-        mic_radius: 1.5,
-        mic_position:Vec2::new(5.0,5.0),
-        rays_to_cast: 100000,
-        speaker_position:Vec2::new(2.0,2.0),
-    };
+    let cli = Cli::parse();
+    println!("Reading config from: {}", cli.config_file);
+    let config_text = fs::read_to_string(&cli.config_file)
+        .expect("Could not read config file");
+    let test_config: SimulationConfig = serde_json::from_str(&config_text)
+        .expect("Could not parse simulation config (Is the JSON formatted correctly?)");
+
+
     println!("Starting single simulation");
     let start_single = Instant::now();
-    let(delays_single, pressures_single) = simulation::run_simulation_single(&test_config, &room);
+    let(_delays_single, _pressures_single) = simulation::run_simulation_single(&test_config, &room);
     let duration_singe = start_single.elapsed().as_secs_f32();
     println!("Simulation run time: {} s", duration_singe);
 

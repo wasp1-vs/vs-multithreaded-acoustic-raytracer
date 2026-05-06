@@ -27,9 +27,9 @@ pub fn check_intersection(ray: &Ray, wall: &Wall) -> Option<Ray> {
     } else if wall_u < 0.0 || wall_u > 1.0 {
         return None;
     }
-    let hit_point = ray.origin + (ray_t * wall_u);
-    let wall_u_normalized = Vec2::new(-wall_vec.y, wall_vec.x).normalize();
-    let bounced_ray = ray.direction.reflect(wall_u_normalized);
+    let hit_point = ray.origin + (ray_t * ray.direction);
+    let wall_normal = Vec2::new(-wall_vec.y, wall_vec.x).normalize();
+    let bounced_ray = ray.direction.reflect(wall_normal);
 
 
     Some(Ray {

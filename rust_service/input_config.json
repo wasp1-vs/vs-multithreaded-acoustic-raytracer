@@ -1,0 +1,8 @@
+{
+  "max_bounces": 32,
+  "min_pressure": 0.001,
+  "mic_radius": 1.5,
+  "mic_position": [5.0, 5.0],
+  "rays_to_cast": 1000000,
+  "speaker_position": [2.0, 2.0]
+}

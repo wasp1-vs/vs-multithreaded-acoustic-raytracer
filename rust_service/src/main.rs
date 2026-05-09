@@ -19,27 +19,31 @@ struct Cli {
     #[arg(short, long, default_value = "input_config.json")]
     config_file: String,
 }
+
 fn main() {
+
+    let materials_file = simulation::load_materials("materials.json");
+    let materials = materials_file.materials;
     
     let test_wall1 = Wall {
-        start:Vec2::new(10.0,0.0),
-        end:Vec2::new(10.0,10.0),
-        absorption: 0.1
+        start: Vec2::new(10.0,0.0),
+        end: Vec2::new(10.0,10.0),
+        material_name: "concrete".to_string(),
     };
     let test_wall2 = Wall {
         start:Vec2::new(10.0,10.0),
         end:Vec2::new(0.0,10.0),
-        absorption: 0.1
+        material_name: "glass".to_string()
     };
     let test_wall3 = Wall {
         start:Vec2::new(0.0,10.0),
         end:Vec2::new(0.0,0.0),
-        absorption: 0.1
+        material_name: "wood".to_string()
     };
     let test_wall4 = Wall {
         start:Vec2::new(0.0,0.0),
         end:Vec2::new(10.0,0.0),
-        absorption: 0.1
+        material_name: "acoustic_panel".to_string()
     };
     let room: Vec<Wall> = vec![test_wall1, test_wall2, test_wall3, test_wall4];
     let cli = Cli::parse();
@@ -52,13 +56,13 @@ fn main() {
 
     println!("Starting single simulation");
     let start_single = Instant::now();
-    let(_delays_single, _pressures_single) = simulation::run_simulation_single(&test_config, &room);
+    let(_delays_single, _pressures_single) = simulation::run_simulation_single(&test_config, &room, &materials);
     let duration_singe = start_single.elapsed().as_secs_f32();
     println!("Simulation run time: {} s", duration_singe);
 
     println!("Starting parallel simulation");
     let start_parallel = Instant::now();
-    let(delays_par, pressures_par) = simulation::run_simulation_parallel(&test_config, &room);
+    let(delays_par, pressures_par) = simulation::run_simulation_parallel(&test_config, &room, &materials);
     let duration_parallel = start_parallel.elapsed().as_secs_f32();
     println!("Simulation run time: {} s", duration_parallel);
 

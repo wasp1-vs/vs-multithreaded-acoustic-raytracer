@@ -8,7 +8,7 @@ pub struct Ray {
 pub struct Wall {
     pub start: Vec2, // A
     pub end: Vec2,   // B
-    pub absorption: f32,
+    pub material_name: String,
 }
 
 pub fn check_intersection(ray: &Ray, wall: &Wall) -> Option<Ray> {

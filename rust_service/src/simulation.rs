@@ -5,6 +5,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
 use crate::geometry;
 use crate::geometry::{Ray, Wall};
+use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Deserialize)]
 pub struct SimulationConfig {
@@ -14,6 +16,23 @@ pub struct SimulationConfig {
     pub mic_position: Vec2,
     pub rays_to_cast: u32,
     pub speaker_position: Vec2,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Material {
+    pub absorption: Vec<f32>,
+    pub scattering: f32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MaterialsFile {
+    pub center_freqs: Vec<u32>,
+    pub materials: HashMap<String, Material>,
+}
+
+pub fn load_materials(path: &str) -> MaterialsFile {
+    let text = std::fs::read_to_string(path).expect("Material-Datei konnte nicht gelesen werden");
+    serde_json::from_str(&text).expect("Material-JSON konnte nicht geparst werden")
 }
 
 fn generate_initial_ray(config: &SimulationConfig) -> Ray {
@@ -30,6 +49,7 @@ fn simulate_single_ray(
     initial_ray:Ray,
     walls: &Vec<Wall>,
     config: &SimulationConfig,
+    materials: &std::collections::HashMap<String, Material>,
     ray_hits: &mut Vec<(f32,f32)>
 ) {
     ray_hits.clear();
@@ -39,7 +59,7 @@ fn simulate_single_ray(
 
 
     for _bounce in 0..config.max_bounces {
-        if let Some((bounced_ray, absorption)) = cast_ray(&current_ray, walls) {
+        if let Some((bounced_ray, absorption)) = cast_ray(&current_ray, walls, materials) {
 
             total_distance += current_ray.origin.distance(bounced_ray.origin);
             current_pressure *= 1.0 - absorption;
@@ -62,13 +82,13 @@ fn simulate_single_ray(
 }
 
 // Single thread logic
-pub fn run_simulation_single(config: &SimulationConfig, walls: &Vec<Wall>) -> (Vec<f32>, Vec<f32>) {
+pub fn run_simulation_single(config: &SimulationConfig, walls: &Vec<Wall>, materials: &std::collections::HashMap<String, Material>) -> (Vec<f32>, Vec<f32>) {
     let mut delays_singular = Vec::with_capacity(100_000);
     let mut pressures_singular = Vec::with_capacity(100_000);
     let mut temp_ray_buffer = Vec::with_capacity(100);
     for _ in 0..config.rays_to_cast {
         let current_ray = generate_initial_ray(config);
-        simulate_single_ray(current_ray, walls, config, &mut temp_ray_buffer);
+        simulate_single_ray(current_ray, walls, config, materials, &mut temp_ray_buffer);
         for (delay,pressure) in &temp_ray_buffer {
             delays_singular.push(*delay);
             pressures_singular.push(*pressure);
@@ -77,7 +97,7 @@ pub fn run_simulation_single(config: &SimulationConfig, walls: &Vec<Wall>) -> (V
     (delays_singular, pressures_singular)
 }
 
-pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> (Vec<f32>, Vec<f32>) {
+pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>, materials: &std::collections::HashMap<String, Material>) -> (Vec<f32>, Vec<f32>) {
     println!("starting execution");
     let(delays_par, pressures_par, _) = (0..config.rays_to_cast)
         .into_par_iter()
@@ -90,7 +110,7 @@ pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> 
         },
             |mut thread_buckets, _| {
                 let fresh_ray = generate_initial_ray(config);
-                simulate_single_ray(fresh_ray,walls,config,&mut thread_buckets.2); // passing temp buffer to not allocate new memory
+                simulate_single_ray(fresh_ray, walls, config, materials, &mut thread_buckets.2); // passing temp buffer to not allocate new memory
                 for(delay, pressure) in &thread_buckets.2 {
                     thread_buckets.0.push(*delay);
                     thread_buckets.1.push(*pressure);
@@ -108,7 +128,7 @@ pub fn run_simulation_parallel(config: &SimulationConfig, walls: &Vec<Wall>) -> 
     (delays_par, pressures_par)
 }
 
-fn cast_ray(ray: &Ray, walls: &Vec<Wall>) -> Option<(Ray, f32)> {
+fn cast_ray(ray: &Ray, walls: &Vec<Wall>, materials: &std::collections::HashMap<String, Material>) -> Option<(Ray, f32)> {
     let mut closest_bounced_ray: Option<(Ray, f32)> = None;
     // To guarantee that the first wall hit will be shorter
     let mut shortest_distance = f32::MAX;
@@ -117,10 +137,17 @@ fn cast_ray(ray: &Ray, walls: &Vec<Wall>) -> Option<(Ray, f32)> {
             let distance = ray.origin.distance(bounced_ray.origin);
             if distance < shortest_distance {
                 shortest_distance = distance;
-                closest_bounced_ray = Some((bounced_ray, wall.absorption));
+
+                let absorption = materials.get(&wall.material_name)
+                    .map(|mat| {
+                        // Mittelwert über alle Frequenzbänder
+                        mat.absorption.iter().copied().sum::<f32>() / mat.absorption.len() as f32
+                    })
+                    .unwrap_or(0.1); // default fallback
+                
+                closest_bounced_ray = Some((bounced_ray, absorption));
             }
         }
     }
-
     closest_bounced_ray
 }

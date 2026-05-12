@@ -1,0 +1,287 @@
+\documentclass{article}
+
+\usepackage{amsmath}
+
+\usepackage{listings}
+
+
+\begin{document}
+
+
+    \section{Physikalischer Kern: 2D-Strahlensegmentschnitt}
+    \label{sec:2d_ray_intersection}
+
+    Der rechnerische Kern der Physik-Engine basiert auf robuster linearer Algebra, um Randkollisionen zu lösen.
+    Eine genaue mathematische Modellierung in diesem Stadium ist für hochauflösende akustische Simulationen entscheidend.
+    Um den Rechendurchsatz zu maximieren, was bei der Berechnung von Millionen von Strahlen zwingend erforderlich ist, verzichtet die Engine auf
+    rechnerisch aufwändige trigonometrische Funktionen zugunsten reiner Vektormathematik.
+
+    \subsection{Geometrische Definitionen}\label{subsec:geometric-definitions}
+
+    %The two primary geometric entities in the 2D simulation space are the acoustic ray and the physical boundary (representing a wall).
+    Die beiden wichtigsten geometrischen Entitäten im 2D-Simulationsraum sind der akustische Strahl und die physikalische Grenze (die eine Wand darstellt).
+
+    \paragraph{Der Strahl}
+    %A sound ray is defined by an origin point $O$ and a normalized direction vector $\vec{D}$.
+    %Any point $P$ along the ray's trajectory can be calculated as a function of the scalar distance $t$ traveled along that direction:
+    %\[P(t) = O + t\vec{D}\]
+    %where $t \ge 0$ ensures the ray propagates forward in space from the emitter.
+    Ein Schallstrahl wird durch einen Ursprungspunkt $O$ und einen normalisierten Richtungsvektor definiert $\vec{D}$.
+    Jeder Punkt $P$ entlang der Strahlenbahn kann als Funktion der skalaren Distanz $t$ entlang dieser Richtung berechnet werden:
+    \[P(t) = O + t\vec{D}\]
+    wobei $t \ge 0$ sicherstellt, dass der Strahl vom Emitter aus im Raum weitergeht.
+
+
+    \paragraph{Die Wand (Die Strecke)}
+    %A wall is represented as a finite line segment defined by two endpoints, $A$ and $B$.
+    %Any point $W$ on this segment is found by interpolating between the endpoints using a scalar parameter $u$.
+    %Defining the wall vector as $\vec{V} = B - A$, the parametric equation is given by:
+    %\[W(u) = A + u\vec{V}\]
+    %For a point to lie strictly within the physical bounds of the wall segment, the condition $0 \le u \le 1$ must be satisfied.
+
+    Eine Wand wird als Liniensegment dargestellt, das durch zwei Endpunkte, $A$ und $B$, definiert ist.
+    Jeder Punkt $W$ auf diesem Segment wird durch Interpolation zwischen den Endpunkten mit einem skalaren Parameter $u$ gefunden.
+    Definiert man den Wandvektor als $\vec{V} = B - A$, ergibt sich die parametrische Gleichung durch:
+    \[W(u) = A + u\vec{V}\]
+    Damit ein Punkt strikt innerhalb der physikalischen Grenzen des Wandsegments liegt, muss die Bedingung $0 \le u \le 1$ erfüllt sein.
+
+    \subsection{Schnittpunktberechnung}\label{subsec:intersection-formula}
+
+    %To determine the point of intersection, the ray and wall equations are equated:
+    %\[O + t\vec{D} = A + u\vec{V}\]
+    %This forms a system of linear equations to solve for $t$ (propagation distance) and $u$ (segment intersection parameter).
+    %By defining a vector $\vec{E} = A - O$ that points from the ray's origin to the wall's starting point, the equation rearranges to:
+    %\[t\vec{D} - u\vec{V} = \vec{E}\]
+    %In two-dimensional space, this system can be efficiently solved using the 2D analog of the cross product (often referred to as the perp-dot product).
+    %For two arbitrary 2D vectors $\vec{v_1} = (x_1, y_1)$ and $\vec{v_2} = (x_2, y_2)$, this yields a scalar determinant: $\vec{v_1} \times \vec{v_2} = x_1 y_2 - y_1 x_2$.
+    %
+    %By defining the intersection determinant as $\det = \vec{D} \times \vec{V}$, the parameters $t$ and $u$ can be isolated and solved algebraically:
+    %\begin{gather*}
+    %    t = \frac{\vec{E} \times \vec{V}}{\det}\\
+    %    u = \frac{\vec{E} \times \vec{D}}{\det}\\
+    %\end{gather*}
+
+    Um den Schnittpunkt zu bestimmen, werden die Strahlen- und Wandgleichungen gleichgesetzt:
+    \[O + t\vec{D} = A + u\vec{V}\]
+    Dies bildet ein System linearer Gleichungen, um $t$ (Ausbreitungsdistanz) und $u$ (Segmentschnittparameter) zu lösen.
+    Durch die Definition eines Vektors $\vec{E} = A - O$, der vom Ursprung des Strahls zum Ausgangspunkt der Wand zeigt, ordnet sich die Gleichung um:
+    \[t\vec{D} - u\vec{V} = \vec{E}\]
+    Im zweidimensionalen Raum kann dieses System effizient mit dem 2D-Analogon des Kreuzprodukts gelöst werden (oft als Perp-Dot-Produkt bezeichnet).
+    Für zwei beliebige 2D-Vektoren $\vec{v_1} = (x_1, y_1)$ und $\vec{v_2} = (x_2, y_2)$ ergibt sich eine skalare Determinante:$\vec{v_1} \times \vec{v_2} = x_1 y_2 - y_1 x_2$.
+
+    Durch die Definition der Schnittdeterminante als $\det = \vec{D} \times \vec{V}$ können die Parameter $t$ und $u$ isoliert und algebraisch gelöst werden:
+    \begin{gather*}
+        t = \frac{\vec{E} \times \vec{V}}{\det}\\
+        u = \frac{\vec{E} \times \vec{D}}{\det}\\
+    \end{gather*}
+
+
+    \subsection{Schnittpunkt-Validierung (Trefferbedingungen)}\label{subsec:intersection-validation-(hit-conditions)}
+
+    %A mathematically valid solution to the linear system does not inherently guarantee a physical collision.
+    %The following constraints must be verified to confirm a valid acoustic reflection:
+    %\begin{itemize}
+    %    \item \textbf{Parallelism:} If $\det \approx 0$, the ray and the wall are perfectly parallel and will never intersect.
+    %    In the implementation, a small epsilon threshold is used rather than an exact zero check to prevent floating-point inaccuracies.
+    %    \item \textbf{Directionality:} If $t < 0$, the mathematical lines intersect, but the collision occurs behind the ray's point of emission.
+    %    \item \textbf{Segment Bounds:} If $u < 0$ or $u > 1$, the ray intersects the infinite line containing the wall, but misses the physical line segment (e.g., simulating sound passing through an open doorway).
+    %\end{itemize}
+    %A physical boundary collision is only registered if $\det \neq 0$, $t \ge 0$, and $0 \le u \le 1$.
+
+    Eine mathematisch gültige Lösung des linearen Systems garantiert nicht automatisch eine physikalische Kollision.
+    Die folgenden Einschränkungen müssen überprüft werden, um eine gültige akustische Reflexion zu bestätigen:
+    \begin{itemize}
+        \item \textbf{Parallelität:} Wenn $\det \approx 0$, sind der Strahl und die Wand perfekt parallel und schneiden sich niemals
+        In der Implementierung ist ein kleiner Epsilon-Schwellenwert anstelle einer exakten Nullprüfung verwendet, um Gleitkommaungenauigkeiten zu vermeiden:
+
+    \begin{lstlisting}[language=Rust]
+    if det.abs() < 1e-6 {
+        return None;
+    }
+    \end{lstlisting}
+
+        \item \textbf{Richtungsabhängigkeit:} Wenn $t < 0$, schneiden sich die mathematischen Geraden, aber die Kollision erfolgt hinter dem Aussendungspunkt des Strahls:
+    \begin{lstlisting}[language=Rust]
+    if ray_t < 0.0 {
+        return None;
+    }
+    \end{lstlisting}
+        \item \textbf{Segmentgrenzen:} Wenn $u < 0$ oder $u > 1$, schneidet der Strahl zwar die unendliche Gerade, auf der die Wand liegt, verfehlt jedoch die physische Strecke
+    \begin{lstlisting}[language=Rust]
+    if wall_u < 0.0 || wall_u > 1.0 {
+        return None;
+    }
+    \end{lstlisting}
+    \end{itemize}
+
+    \subsection{Vektorreflexion}\label{subsec:reflection-vector-calculation}
+
+    %Upon confirming a valid intersection, the resulting trajectory of the sound wave must be calculated.
+    %This requires the surface normal vector $\vec{N}$, which points strictly perpendicular away from the wall.
+    %For a given 2D wall vector $\vec{V} = (x, y)$, the normalized perpendicular normal is $\vec{N} = (-y, x)$.
+
+    Nach der Bestätigung eines gültigen Schnittpunkts muss die resultierende Trajektorie der Schallwelle berechnet werden.
+    Dies erfordert den Oberflächennormalenvektor $\vec{N}$, der streng senkrecht von der Wand weg zeigt
+    Für einen gegebenen 2D-Wandvektor $\vec{V} = (x, y)$ ist die normierte senkrechte Normale $\vec{N} = (-y, x)$.
+
+    %The reflected ray direction $\vec{R}$ is determined by taking the incoming ray direction $\vec{D}$ and subtracting twice the projection of that direction onto the surface normal:
+    %\[\vec{R} = \vec{D} - 2(\vec{D} \cdot \vec{N})\vec{N}\]
+    %Within the Rust codebase, this vector reflection calculation is optimized using the \texttt{reflect} method provided by the \texttt{glam} crate,
+    %which leverages SIMD instructions to perform this operation with minimal overhead.
+
+    Die Richtung des reflektierten Strahls $\vec{R}$ wird bestimmt, indem von der Richtung des einfallenden Strahls $\vec{D}$ das Doppelte der Projektion dieser Richtung
+    auf die Oberflächennormale subtrahiert wird.
+    \[\vec{R} = \vec{D} - 2(\vec{D} \cdot \vec{N})\vec{N}\]
+    Innerhalb der Rust-Codebasis wird diese Berechnung der Vektorreflexion durch die \texttt{reflect} Methode optimiert, die vom \texttt{glam}-Crate bereitgestellt wird und
+    Single Instruction, Multiple Data (SIMD)-Instruktionen nutzt, um diese Operationen mit minimalem Overhead durchzuführen.
+
+
+
+    \section{Hochleistungs-Nebenläufigkeit und Datenparallelität}
+    \label{sec:concurrency}
+
+    %A primary advantage of Rust in high-performance computing is its strict compile-time guarantees against data races, colloquially known as
+    %``fearless concurrency.'' Distributing a heavily iterative physics loop across multi-core processor architectures in traditional languages often
+    %requires complex thread-locking logic (e.g., Mutexes) to prevent memory corruption.
+    %This engine avoids locking overhead entirely by employing a functional, data-parallel paradigm utilizing the \texttt{rayon} crate.
+
+    Ein wesentlicher Vorteil von Rust im High-Performance-Computing sind seine strengen Garantien zur Kompilierzeit gegen Data-Races.
+    Die Verteilung einer rechenintensiven, iterativen Physikschleife auf Multi-Core-Prozessorarchitekturen erfordert in traditionellen
+    Programmiersprachen oft komplexe Thread-Sperrlogiken (z.B. Mutexe), um Speicherbeschädigungen zu verhindern.
+    In dieser Engine wird dieser Overhead vermieden durch ein funktionales, datenparalleles Paradigma unter Verwendung des \texttt{rayon}-Crates.
+
+    \subsection{Architektonischer Wandel: Von Shared Mutation zu thread-lokalem-Folding}\label{subsec:architectural-shift:-from-shared-mutation-to-thread-local-folding}
+
+    %In a standard single-threaded execution, sequential iterations append calculated intersection data (e.g., delay and pressure values) into a shared dynamic array.
+    %Forcing this loop across numerous threads would result in concurrent write attempts to the same memory addresses, leading to immediate data races.
+    %Rather than wrapping these shared arrays in computationally expensive, thread-safe locks, the architecture leverages \texttt{rayon}'s \texttt{into\_par\_iter()} trait
+    %combined with a \texttt{fold} and \texttt{reduce} pipeline.
+
+    Bei einer standardmäßigen Single-Thread-Ausführung hängen sequenzielle Iterationen die berechneten Schnittpunktdaten (z.B. delay und pressure werte) an ein gemeinsames dynamisches Array an.
+    Diese Schleife auf zahlreiche Threads aufzuteilen, würde zur gleichzeitigen Schreibversuchen auf dieselben Speicheradressen führen, was unmittelbare Data Races zur Folge hätte.
+    Anstatt diese gemeinsam genutzt Arrays in rechenintensive, threadsichere Sperren (Locks) zu hüllen, nutzt die Architektur das Trait \texttt{into\_par\_iter()} von \texttt{rayon} in
+    Kombination mit einer \texttt{fold}- und \texttt{reduce}- Pipeline.
+
+    Dieser Ansatz teilt die Arbeitslast sicher auf alle verfügbaren CPU-Kerne auf.
+    Anstatt zu versuchen, in ein globales Array zu schreiben oder Speicher für jeden Strahl
+    dynamisch zu allokieren, verwendet die Engine die \texttt{fold}-Operation, um einen privaten, vorab allokieren, thread-lokalen Puffer für jeden Kern bereitzustellen.
+
+    Jeder Thread simuliert unabhängig seine zugewiesene Teilmenge an Strahlen und hängt die Schnittpunktergebnisse sequenziell in seinen eigenen lokalen Speicherbereich an, ohne Sperren (lock-free).
+    Sobald ein Thread seine Arbeitslast abgeschlossen hat, wird die \texttt{reduce}-Phase aktiviert, welche diese isolierten thread-lokalen Puffer sicher und effizient zu den endgültigen,
+    vereinheitlichten Arrays zusammenführt.
+    Dieser funktionale Ansatz garantiert die Datensicherheit und maximiert gleichzeitig die Hardwareauslastung.
+
+    %This approach safely divides the workload—the generation and simulation of acoustic rays—among all available CPU cores.
+    %Instead of attempting to write to a global array or dynamically allocating memory for every individual ray, the engine utilizes the \texttt{fold} operation to provision a private,
+    %pre-allocated, thread-local buffer for each core.
+
+    %Each thread independently simulates its assigned subset of rays and sequentially appends the intersection results into its own local memory space, completely lock-free.
+    %Once a thread completes its workload, the \texttt{reduce} phase activates, safely and efficiently merging these isolated thread-local buffers into the final, unified arrays.
+    %This functional approach guarantees data safety while maximizing hardware utilization.
+
+    \begin{lstlisting}[language=Rust]
+use rayon::prelude::*;
+
+fn run_simulation_parallel(
+config: &SimulationConfig,
+walls: &Vec<Wall>
+) -> (Vec<f32>, Vec<f32>) {
+    let(delays_par, pressures_par, _) = (0..config.rays_to_cast)
+        .into_par_iter()
+        // 1. Falten, Split
+        .fold( || {
+            let local_delays = Vec::with_capacity(CAPACITY);
+            let local_pressures = Vec::with_capacity(CAPACITY);
+            let temp_ray_buffer = Vec::with_capacity(CAP);
+
+            (local_delays,local_pressures,temp_ray_buffer)
+        },
+            |mut local_buf, _| {
+                let fresh_ray = generate_initial_ray(config);
+                simulate_single_ray(fresh_ray,walls,config,&mut local_buf.2);
+                for(delay, pressure) in &local_buf.2 {
+                    local_buf.0.push(*delay);
+                    local_buf.1.push(*pressure);
+                }
+                local_buf
+            }
+        // 2. Reduzieren, Global Merge
+        ).reduce(
+        || (Vec::new(),Vec::new(),Vec::new()),
+        |mut a, mut b| {
+            a.0.append(&mut b.0);
+            a.1.append(&mut b.1);
+            a
+        }
+    );
+    (delays_par, pressures_par)
+}
+    \end{lstlisting}
+
+
+    \section{Leistungsoptimierungen und Profiling}
+    \label{sec:optimizations}
+
+    Benchmarking the compiled binary (utilizing Rust's \texttt{--release} flag for maximum LLVM optimization)
+    revealed significant bottlenecks and subsequent optimization opportunities within the parallelized architecture.
+
+    Das Benchmarking der kompilierten Binärdatei (unter Verwendung des \texttt{--release} flag und dem \texttt{let var = Instant::now();} timer) deckte signifikante
+    Engpässe und darauffolgende Optimierungsmöglichkeiten innerhalb der parallelisierten Architektur auf.
+
+
+    \subsection{Reduzierung des Speicherallokations-Overheads: \texttt{flat\_map} vs. \texttt{fold}}
+    \label{sec:memory_overhead}
+
+
+    Während die anfängliche parallele Implementierung den \texttt{flat\_map}-iterator von \texttt{rayon} nutzt, offenbarte die Skalierung der Simulation auf $100.000.000$ Strahlen einen
+    signifikanten Leistungsengpass bezüglich der Speicherallokation.
+    Die \texttt{flat\_map}-Operation allozierte dynamisch einen neuen \texttt{Vec} für die Rückgabedaten jedes einzelnen Strahls.
+    Bei der Verteilung auf alle CPU-Kerne führte dies zu Millionen von flüchtigen Heap-Allokationen pro Sekunde.
+    Das System erlebte Memory Thrashing; die CPU-Auslastung fiel auf 0\% der Hauptspeicher war ausgelastet, und das Betriebssystem entzog dem Ausführungs-Thread die Ressourcen,
+    was zum Stillstand der Simulation führte.
+
+    Um diesen Allokations-Overhead zu beheben, wurde die parallele Pipeline refaktorisiert, um das \texttt{fold}-Muster zu verwenden.
+    Anstatt Speicher pro Strahl zu allokieren, stellt die \texttt{fold}-Operation exakt einen thread-lokalen Puffer (initialisiert über \texttt{Vec::with\_capacity();}) pro CPU-Kern bereit.
+    Die Kerne akkumulieren ihre lokalen Ergebnisse und führen diese erst nach Abschluss des Threads zusammen.
+    Diese architektonische Änderung reduzierte die Heap-Allokationen um mehrere Größenordnungen und ermöglichte es dem System, $100.000.000$ Strahlen effizient zu verarbeiten,
+    ohne die Speicherressourcen zu erschöpfen.
+    %While the initial parallel implementation utilized \texttt{rayon}'s \texttt{flat\_map} iterator, scaling the simulation to $100,000,000$ rays exposed a critical flaw in memory allocation.
+    %The \texttt{flat\_map} operation dynamically allocated a new \texttt{Vec} for every single ray's return data.
+    %When distributed across all CPU cores, this resulted in millions of transient heap allocations per second.
+    %The system experienced severe memory thrashing; CPU utilization dropped to 0\%, system memory was exhausted, and the OS starved the execution thread, causing the simulation to stall.
+    %
+    %To resolve this allocator crisis, the parallel pipeline was refactored to use the \texttt{fold} pattern.
+    %Instead of allocating memory per ray, the \texttt{fold} operation provisions exactly one thread-local buffer (initialized via \texttt{Vec::with\_capacity()}) per CPU core.
+    %The cores accumulate their local results and merge them only upon thread completion.
+    %This architectural shift reduced heap allocations by orders of magnitude, allowing the system to process $100,000,000$ rays without memory exhaustion.
+
+
+    \subsection{Benchmarking Ergebnisse und I/O Overhead}
+    \label{sec:benchmarks}
+
+    Empirische Tests verdeutlichen die Wirksamkeit der optimierten Parallelisierung sowie die verborgenen Kosten von System-I/O und Thread-Initialisierung.
+    %Empirical testing highlighted the effectiveness of the optimized parallelization, as well as the hidden costs of system I/O and thread initialization.
+
+    \begin{itemize}
+        \item \textbf{Paralleler Speedup:} Bei einer moderaten Arbeitslast wurde die Single-Thread-Simulation in $11,79$ Sekunden abgeschlossen.
+        Die durch \texttt{rayon} optimierte parallele Simulation bewältigt dieselbe Arbeitslast in $2,56$ Sekunden, was einen $4{,}60\times$ Speedup auf der Test-Hardware ergab.
+        \item \textbf{Thread-Pool-Kaltstart:} Bei extrem kleinen Arbeitslasten wies \texttt{rayon} einen Initialisierung-Overhead auf.
+        In einem Benchmark mit wenigen Strahlen wurde die Single-Thread-Ausführung in $0,14$ Sekunden abgeschlossen, während die parallele Ausführung $0,34$ Sekunden in Anspruch nahm.
+        Dies deutet darauf hin, dass die Kosten für die Initialisierung des Thread-Pools die Recheneinsparungen bei trivialen Arbeitslasten überwiegen
+        \item \textbf{The I/O Engpass:} Das Profiling der End-to-End-Ausführungszeit deckte einen massiven Engpass bei der Datenserialisierung auf.
+        In einem Test mit $10.000.000$ Strahlen wurde die interne Simulation schnell ausgeführt($4,72s$ Single-Thread vs. $0,64s$ Parallel).
+        Die anschließende Serialisierung und das Schreiben des Datensatzes dominierten jedoch die End-to-End-Laufzeit($37,40s$ vs. $33,24s$),
+        was die Notwendigkeit eines RAM-gestützten \texttt{BufWriter} unterstreicht.
+    \end{itemize}
+    %\begin{itemize}
+    %    \item \textbf{Parallel Speedup:} For a moderate workload, the single-threaded simulation completed in 11.79 seconds. The \texttt{rayon}-optimized parallel simulation completed the same workload in 2.56 seconds, yielding a $4.60\times$ speedup on the test hardware.
+    %    \item \textbf{Thread Pool Cold Start:} For extremely small workloads, \texttt{rayon} exhibited an initialization overhead.
+    %    In a low-ray benchmark, the single-threaded execution completed in 0.14 seconds, whereas the parallel execution took 0.34 seconds.
+    %    This indicates that the cost of initializing the thread pool outweighs the computational savings for trivial workloads.
+    %    \item \textbf{The I/O Bottleneck:} Profiling the end-to-end execution time revealed a massive bottleneck in data serialization.
+    %    In a test generating 1,533,997 acoustic hits, the internal simulation executed rapidly, but writing the massive dataset to \texttt{ir\_output.json} took over 30 seconds (32.27s single-threaded total vs.
+    %    31.28s parallel total).
+    %    This demonstrated that standard file I/O operations entirely eclipsed the physics engine's execution time,
+    %    necessitating the subsequent implementation of a \texttt{BufWriter} to stage the serialization in RAM.
+    %\end{itemize}
+\end{document}

@@ -20,31 +20,38 @@ struct Cli {
     config_file: String,
 }
 
-fn main() {
+// Helper function to pre-calculate the average so you don't repeat code
+fn get_average_absorption(materials: &HashMap<String, Material>, name: &str) -> f32 {
+    materials.get(name)
+        .map(|mat| mat.absorption.iter().sum::<f32>() / mat.absorption.len() as f32)
+        .unwrap_or(0.1)
+}
 
+fn main() {
     let materials_file = simulation::load_materials("materials.json");
     let materials = materials_file.materials;
-    
+
     let test_wall1 = Wall {
-        start: Vec2::new(10.0,0.0),
-        end: Vec2::new(10.0,10.0),
-        material_name: "concrete".to_string(),
+        start: Vec2::new(10.0, 0.0),
+        end: Vec2::new(10.0, 10.0),
+        absorption: get_average_absorption(&materials, "concrete"),
     };
     let test_wall2 = Wall {
         start:Vec2::new(10.0,10.0),
         end:Vec2::new(0.0,10.0),
-        material_name: "glass".to_string()
+        absorption: get_average_absorption(&materials, "glass"),
     };
     let test_wall3 = Wall {
         start:Vec2::new(0.0,10.0),
         end:Vec2::new(0.0,0.0),
-        material_name: "wood".to_string()
+        absorption: get_average_absorption(&materials, "wood"),
     };
     let test_wall4 = Wall {
         start:Vec2::new(0.0,0.0),
         end:Vec2::new(10.0,0.0),
-        material_name: "acoustic_panel".to_string()
+        absorption: get_average_absorption(&materials, "acoustic_panel"),
     };
+    
     let room: Vec<Wall> = vec![test_wall1, test_wall2, test_wall3, test_wall4];
     let cli = Cli::parse();
     println!("Reading config from: {}", cli.config_file);

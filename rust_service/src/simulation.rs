@@ -124,3 +124,46 @@ fn cast_ray(ray: &Ray, walls: &Vec<Wall>) -> Option<(Ray, f32)> {
 
     closest_bounced_ray
 }
+
+pub fn simulate_single_ray_visualisation(
+    initial_ray:Ray,
+    walls: &Vec<Wall>,
+    config: &SimulationConfig,
+    path_buffer: &mut Vec<Vec2>
+) {
+    path_buffer.clear();
+    path_buffer.push(initial_ray.origin);
+    let mut current_ray = initial_ray;
+    let mut current_pressure = 1.0;
+
+
+    for _bounce in 0..config.max_bounces {
+        if let Some((bounced_ray, absorption)) = cast_ray(&current_ray, walls) {
+
+            path_buffer.push(bounced_ray.origin);
+            current_pressure *= 1.0 - absorption;
+
+            if current_pressure < config.min_pressure {
+                break;
+            }
+            current_ray = bounced_ray;
+
+        } else { break; }
+    }
+}
+pub fn run_simulation_visualizer(
+    rays_to_trace: u32,
+    config: &SimulationConfig,
+    walls: &Vec<Wall>
+) -> Vec<Vec<Vec2>> {
+    let mut all_paths = Vec::with_capacity(rays_to_trace as usize);
+    let mut temp_path = Vec::with_capacity(config.max_bounces as usize + 1);
+    for _ in 0..rays_to_trace {
+        let current_ray = generate_initial_ray(config);
+        simulate_single_ray_visualisation(current_ray, walls, config, &mut temp_path);
+
+        all_paths.push(temp_path.clone());
+
+    }
+    all_paths
+}

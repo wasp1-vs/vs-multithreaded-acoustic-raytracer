@@ -22,7 +22,8 @@ pub fn check_intersection(ray: &Ray, wall: &Wall) -> Option<Ray> {
     let ray_t = (from_ray_to_wall_start.perp_dot(wall_vec))/det;        // how far the ray travels
     let wall_u = (from_ray_to_wall_start.perp_dot(ray.direction))/det;  // where on the wall it hits
 
-     if ray_t < 0.0 {
+    // PREVIOUSLY 0.0 change this to see the difference for PR
+     if ray_t < 0.001 {
         return None;
     } else if wall_u < 0.0 || wall_u > 1.0 {
         return None;

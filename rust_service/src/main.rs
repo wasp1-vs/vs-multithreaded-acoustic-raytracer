@@ -66,4 +66,10 @@ fn main() {
     println!("\nSpeedup time: {:.2}x s", speedup);
 
     export::export_results(delays_par, pressures_par, &test_config);
+
+
+    let rays_to_visualize =simulation::run_simulation_visualizer(15, &test_config, &room);
+    export::export_visualisation_data(rays_to_visualize, &test_config);
+
+
 }

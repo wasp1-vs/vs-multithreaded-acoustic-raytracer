@@ -249,3 +249,6 @@ rustc-ice-*.txt
 *.flac
 *.ogg
 *.json
+
+
+rust_service/target/

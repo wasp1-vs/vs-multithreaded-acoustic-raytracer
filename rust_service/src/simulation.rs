@@ -41,19 +41,26 @@ fn simulate_single_ray(
     for _bounce in 0..config.max_bounces {
         if let Some((bounced_ray, absorption)) = cast_ray(&current_ray, walls) {
 
-            total_distance += current_ray.origin.distance(bounced_ray.origin);
-            current_pressure *= 1.0 - absorption;
 
-            if current_pressure < config.min_pressure {
-                break;
-            }
             let start_point = current_ray.origin;
             let end_point = bounced_ray.origin;
             if geometry::check_mic_intersection(start_point, end_point, config.mic_position, config.mic_radius) {
                 let distance_to_mic = start_point.distance(config.mic_position);
                 let total_distance_at_hit = total_distance + distance_to_mic;
-                ray_hits.push((total_distance_at_hit / 343.0, current_pressure)); // meter / sec
+                //println!("total dist: {}",total_distance_at_hit);
+                if total_distance_at_hit >0.001 { //Spawn epsilon
+                    ray_hits.push((total_distance_at_hit / 343.0, current_pressure));
+                }
+                 // meter / sec
             }
+            total_distance += start_point.distance(end_point);
+            current_pressure *= 1.0 - absorption;
+
+            if current_pressure < config.min_pressure {
+                break;
+            }
+
+
 
             current_ray = bounced_ray;
 

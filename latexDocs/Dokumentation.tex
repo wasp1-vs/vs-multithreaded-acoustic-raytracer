@@ -2,7 +2,23 @@
 
 \usepackage{amsmath}
 
+\usepackage{xcolor}
+
 \usepackage{listings}
+
+\lstdefinelanguage{Rust}{
+    keywords={fn, let, mut, match, return, if, else, for, while, loop, impl, struct, enum, pub, use, trait, type},
+    keywordstyle=\color{blue}\bfseries,
+    ndkeywords={bool, u8, u16, u32, u64, f32, f64, i8, i16, i32, i64, String, Vec, Option, Result},
+    ndkeywordstyle=\color{purple}\bfseries,
+    sensitive=true,
+    comment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    commentstyle=\color{gray}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    morestring=[b]",
+    morestring=[b]'
+}
 
 
 \begin{document}

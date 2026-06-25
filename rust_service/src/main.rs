@@ -81,11 +81,11 @@ fn main() {
     // Höhe:  3m
     let width = 10.0;
     let depth = 10.0;
-    let height = 3.0;
+    let height = 10.0;
 
     // Absorption der Flächen.
     // 0.1 bedeutet: 10% Energieverlust pro Reflexion.
-    let absorption = 0.1;
+    let absorption = 0.2;
 
     // Liste aller Dreiecke im Raum.
     let mut room: Vec<Triangle> = Vec::new();
@@ -171,7 +171,7 @@ fn main() {
 
     // Einige Rays für Visualisierung exportieren.
     let rays_to_visualize =
-        simulation::run_simulation_visualizer(15, &test_config, &room);
+        simulation::run_simulation_visualizer(1, &test_config, &room);
 
     export::export_visualisation_data(rays_to_visualize, &test_config);
 }

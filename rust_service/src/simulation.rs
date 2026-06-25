@@ -127,7 +127,7 @@ fn simulate_single_ray(
             total_distance += start_point.distance(end_point);
 
             // Bei jeder Reflexion verliert der Ray Energie.
-            current_pressure *= 1.0 - absorption;
+            current_pressure *= (1.0 - absorption).sqrt();
 
             // Wenn der Ray zu leise geworden ist, brechen wir ab.
             if current_pressure < config.min_pressure {

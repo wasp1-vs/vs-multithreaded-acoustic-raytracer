@@ -30,6 +30,7 @@ struct OutputMetadata {
 struct OutputHits {
     delays_seconds: Vec<f32>,
     pressures: Vec<f32>,
+    directions: Vec<[f32; 3]>,
 }
 
 
@@ -57,8 +58,14 @@ pub struct VisualizerOutput {
 pub fn export_results(
     delays: Vec<f32>,
     pressure: Vec<f32>,
+    directions: Vec<Vec3>,
     config: &SimulationConfig
 ) {
+    // Vec3 zu [f32; 3] konvertieren für JSON-Serialisierung
+    let directions_array: Vec<[f32; 3]> = directions.iter()
+        .map(|v| [v.x, v.y, v.z])
+        .collect();
+
     let final_data = IrOutput {
         metadata: OutputMetadata {
             sample_rate: 44100,
@@ -69,6 +76,7 @@ pub fn export_results(
         hits: OutputHits {
             delays_seconds: delays,
             pressures: pressure,
+            directions: directions_array,
         },
     };
 

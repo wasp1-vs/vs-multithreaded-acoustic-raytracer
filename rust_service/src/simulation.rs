@@ -73,7 +73,7 @@ fn simulate_single_ray(
     initial_ray: Ray,
     triangles: &Vec<Triangle>,
     config: &SimulationConfig,
-    ray_hits: &mut Vec<(f32, f32)>
+    ray_hits: &mut Vec<(f32, f32, Vec3)>
 ) {
     // Alten Inhalt im Buffer löschen, damit keine Daten vom letzten Ray übrig bleiben.
     ray_hits.clear();
@@ -107,6 +107,10 @@ fn simulate_single_ray(
                 config.mic_position,
                 config.mic_radius
             ) {
+
+                // Richtung vom Mikrofon zum Treffpunkt
+                let direction = (end_point - config.mic_position).normalize();
+
                 // Entfernung vom Segmentstart zum Mikrofon.
                 // Einfach gehalten wie im bisherigen Code.
                 let distance_to_mic = start_point.distance(config.mic_position);
@@ -119,7 +123,7 @@ fn simulate_single_ray(
 
                     // Delay = Strecke / Schallgeschwindigkeit.
                     // 343 m/s ist ungefähr Schallgeschwindigkeit in Luft.
-                    ray_hits.push((total_distance_at_hit / 343.0, current_pressure));
+                    ray_hits.push((total_distance_at_hit / 343.0, current_pressure, direction));
                 }
             }
 
@@ -150,9 +154,10 @@ fn simulate_single_ray(
 pub fn run_simulation_single(
     config: &SimulationConfig,
     triangles: &Vec<Triangle>
-) -> (Vec<f32>, Vec<f32>) {
+) -> (Vec<f32>, Vec<f32>, Vec<Vec3>) {
     let mut delays_singular = Vec::with_capacity(100_000);
     let mut pressures_singular = Vec::with_capacity(100_000);
+    let mut directions_singular = Vec::with_capacity(100_000);
 
     // Temporärer Buffer, damit nicht für jeden Ray neu Speicher erzeugt wird.
     let mut temp_ray_buffer = Vec::with_capacity(100);
@@ -167,13 +172,14 @@ pub fn run_simulation_single(
             &mut temp_ray_buffer
         );
 
-        for (delay, pressure) in &temp_ray_buffer {
+        for (delay, pressure, dir) in &temp_ray_buffer {
             delays_singular.push(*delay);
             pressures_singular.push(*pressure);
+            directions_singular.push(*dir);
         }
     }
 
-    (delays_singular, pressures_singular)
+    (delays_singular, pressures_singular, directions_singular)
 }
 
 
@@ -182,18 +188,19 @@ pub fn run_simulation_single(
 pub fn run_simulation_parallel(
     config: &SimulationConfig,
     triangles: &Vec<Triangle>
-) -> (Vec<f32>, Vec<f32>) {
+) -> (Vec<f32>, Vec<f32>, Vec<Vec3>) {
     println!("starting execution");
 
-    let (delays_par, pressures_par, _) = (0..config.rays_to_cast)
+    let (delays_par, pressures_par, directions_par, _) = (0..config.rays_to_cast)
         .into_par_iter()
         .fold(
             || {
                 let local_delays = Vec::with_capacity(100_000);
                 let local_pressures = Vec::with_capacity(100_000);
+                let local_directions = Vec::with_capacity(100_000);
                 let temp_ray_buffer = Vec::with_capacity(100);
 
-                (local_delays, local_pressures, temp_ray_buffer)
+                (local_delays, local_pressures, local_directions, temp_ray_buffer)
             },
             |mut thread_buckets, _| {
                 let fresh_ray = generate_initial_ray(config);
@@ -202,27 +209,31 @@ pub fn run_simulation_parallel(
                     fresh_ray,
                     triangles,
                     config,
-                    &mut thread_buckets.2
+                    &mut thread_buckets.3
                 );
 
-                for (delay, pressure) in &thread_buckets.2 {
+                for (delay, pressure, direction) in &thread_buckets.3 {
                     thread_buckets.0.push(*delay);
                     thread_buckets.1.push(*pressure);
+                    thread_buckets.2.push(*direction);
                 }
+
+                thread_buckets.3.clear();
 
                 thread_buckets
             }
         )
         .reduce(
-            || (Vec::new(), Vec::new(), Vec::new()),
+            || (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
             |mut a, mut b| {
                 a.0.append(&mut b.0);
                 a.1.append(&mut b.1);
+                a.2.append(&mut b.2);
                 a
             }
         );
 
-    (delays_par, pressures_par)
+    (delays_par, pressures_par, directions_par)
 }
 
 

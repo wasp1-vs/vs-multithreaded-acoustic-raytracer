@@ -13,16 +13,8 @@ Pipeline position:
 
 from __future__ import annotations
 
-import json
-from functools import lru_cache
-from pathlib import Path
-
 import numpy as np
 from scipy import signal
-
-# Material-Datenbank (Per-Band-Absorption) kommt aus dem Rust-Service,
-# damit Tracer und Faltung dieselben Koeffizienten nutzen.
-_MATERIALS_JSON = Path(__file__).resolve().parent.parent / "rust_service" / "materials.json"
 
 
 def build_impulse_response(
@@ -59,98 +51,83 @@ def build_impulse_response(
     return ir
 
 
-@lru_cache(maxsize=1)
-def _load_materials(path: str) -> tuple[tuple[float, ...], dict[str, tuple[float, ...]]]:
-    """Laedt center_freqs + Per-Band-Absorption aus materials.json (Rust-Service)."""
-    data = json.loads(Path(path).read_text())
-    centers = tuple(float(f) for f in data["center_freqs"])
-    materials = {
-        name: tuple(float(a) for a in m["absorption"])
-        for name, m in data["materials"].items()
-    }
-    for name, alphas in materials.items():
-        if len(alphas) != len(centers):
-            raise ValueError(
-                f"material '{name}': {len(alphas)} bands but {len(centers)} center_freqs"
-            )
-    return centers, materials
-
-
-def available_materials() -> list[str]:
-    _, materials = _load_materials(str(_MATERIALS_JSON))
-    return sorted(materials)
-
-
-def _octave_band_edges(centers: tuple[float, ...]) -> list[tuple[float | None, float | None]]:
-    """(low, high) Grenzfrequenz pro Band; None = offenes Ende (Tief-/Hochpass)."""
-    n = len(centers)
-    edges: list[tuple[float | None, float | None]] = []
-    for i in range(n):
-        low = None if i == 0 else (centers[i - 1] * centers[i]) ** 0.5
-        high = None if i == n - 1 else (centers[i] * centers[i + 1]) ** 0.5
-        edges.append((low, high))
-    return edges
-
-
-def _bandpass(x: np.ndarray, low: float | None, high: float | None, nyquist: float) -> np.ndarray:
-    if low is None:
-        sos = signal.butter(4, high / nyquist, btype="lowpass", output="sos")
-    elif high is None:
-        sos = signal.butter(4, low / nyquist, btype="highpass", output="sos")
-    else:
-        sos = signal.butter(4, [low / nyquist, high / nyquist], btype="bandpass", output="sos")
-    return signal.sosfiltfilt(sos, x)
-
-
-def apply_material_absorption(
-    ir: np.ndarray,
+def build_binaural_ir(
+    delays_seconds: np.ndarray | list[float],
+    pressures: np.ndarray | list[float],
+    directions: list[list[float]] | np.ndarray,
     sample_rate: int,
-    material: str,
-    mean_free_path_s: float = 0.02,
 ) -> np.ndarray:
-    """Frequenzabhaengige Material-Daempfung auf eine Impulsantwort anwenden.
-
-    Der Ray-Tracer liefert nur einen Skalar-Druck pro Hit; welche Frequenzen ein
-    Material schluckt, geht dort verloren. Dieses Modell holt das im Frequenzraum
-    zurueck: Ein Reflexions-Tap zur Zeit t hat ~ t / mean_free_path_s Reflexionen
-    hinter sich. Pro Oktavband b mit Absorptionskoeffizient alpha_b bleibt nach
-    n Reflexionen der Anteil (1 - alpha_b)^n. Hohe Baender mit hohem alpha
-    (z.B. Teppich) klingen schneller aus als tiefe -> dunklerer, kuerzerer Hall;
-    Beton (kleines alpha ueberall) bleibt hell und lang.
-
-    Per-Surface-Materialtrennung (Teppich-Tap vs Beton-Tap) braucht
-    Per-Band-Druecke aus dem Rust-Tracer - das ist hier bewusst nicht moeglich.
     """
-    centers, materials = _load_materials(str(_MATERIALS_JSON))
-    if material not in materials:
-        raise ValueError(f"unknown material '{material}', known: {sorted(materials)}")
-    if mean_free_path_s <= 0:
-        raise ValueError(f"mean_free_path_s must be positive, got {mean_free_path_s}")
-    if sample_rate <= 0:
-        raise ValueError(f"sample_rate must be positive, got {sample_rate}")
+    Erzeugt ein Stereo Impulsantwort-Array, das die Richtung der Strahlen berücksichtigt.
 
-    ir = np.asarray(ir, dtype=np.float64)
-    nyquist = sample_rate / 2.0
-    reflections = (np.arange(ir.size, dtype=np.float64) / sample_rate) / mean_free_path_s
+    Simple Pan basierend auf Azimut (xy-Ebene) wird verwendet.
 
-    # sosfiltfilt braucht eine Mindestlaenge; zu kurze IRs nicht filtern.
-    if ir.size <= 24:
-        return ir
+    Returns:
+        np.ndarray mit Form (Samples, 2) für Stereo
+    """
+    delays = np.asarray(delays_seconds, dtype=np.float64)
+    pressures = np.asarray(pressures, dtype=np.float64)
+    directions = np.asarray(directions, dtype=np.float64)
 
-    shaped = np.zeros_like(ir)
-    for (low, high), alpha in zip(_octave_band_edges(centers), materials[material]):
-        band = _bandpass(ir, low, high, nyquist)
-        gain = np.power(max(1e-6, 1.0 - alpha), reflections)
-        shaped += band * gain
-    return shaped
+    if not (len(delays) == len(pressures) == len(directions)):
+        raise ValueError("delays, pressures und directions müssen gleiche Länge haben")
+
+    indices = np.round(delays * sample_rate).astype(int)
+    ir_length = int(indices.max()) + 1
+
+    ir_left = np.zeros(ir_length)
+    ir_right = np.zeros(ir_length)
+
+    for idx, pressure, direction in zip(indices, pressures, directions):
+        x, y, z = direction
+        azimuth = np.arctan2(y, x)                                # Winkel um Z-Achse
+
+        # Einfaches lineares Pan: -90° links (0), 0° Mitte (0.5), +90° rechts (1)
+        pan = 0.5 * (1 + np.sin(azimuth))
+
+        left_gain = np.cos(pan * np.pi / 2)
+        right_gain = np.sin(pan * np.pi / 2)
+
+        ir_left[idx] += pressure * left_gain
+        ir_right[idx] += pressure * right_gain
+
+    return np.stack([ir_left, ir_right], axis=1)
+
+
+def convolve_binaural(                                           
+    dry_audio: np.ndarray,
+    sample_rate: int,
+    delays_seconds,
+    pressures,
+    directions,
+) -> np.ndarray:
+    """Faltung mit binauralem IR mit Pan basierend auf Richtung."""
+
+    ir = build_binaural_ir(delays_seconds, pressures, directions, sample_rate)
+
+    if dry_audio.ndim == 1:
+        wet_left = signal.oaconvolve(dry_audio, ir[:, 0], mode="full")
+        wet_right = signal.oaconvolve(dry_audio, ir[:, 1], mode="full")
+        wet = np.stack([wet_left, wet_right], axis=1)
+
+    elif dry_audio.ndim == 2:
+        channels = []
+        for c in range(dry_audio.shape[1]):
+            wet_left = signal.oaconvolve(dry_audio[:, c], ir[:, 0], mode="full")
+            wet_right = signal.oaconvolve(dry_audio[:, c], ir[:, 1], mode="full")
+            channels.append(np.stack([wet_left, wet_right], axis=1))
+        wet = np.concatenate(channels, axis=1)
+
+    else:
+        raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+
+    return wet.astype(np.float32)
 
 
 def convolve(
     dry_audio: np.ndarray,
     sample_rate: int,
     ir_data: dict,
-    material: str | None = None,
-    mean_free_path_s: float = 0.02,
 ) -> np.ndarray:
     """Faltung des trockenen Audios mit dem aus `ir_data` erzeugten IR.
 
@@ -162,10 +139,6 @@ def convolve(
                 ir_data["metadata"]["sample_rate"]: int
                 ir_data["hits"]["delays_seconds"]: list[float]
                 ir_data["hits"]["pressures"]: list[float]
-        material: Optionaler Material-Name (siehe MATERIALS). Aktiviert
-            frequenzabhaengige Daempfung. None = breitbandig wie bisher.
-        mean_free_path_s: Mittlere Zeit zwischen zwei Reflexionen in Sekunden;
-            steuert wie schnell die Material-Absorption mit der Hall-Zeit greift.
 
     Returns:
         Raw wet audio als float32-NumPy-Array. Nicht normalisiert -
@@ -182,6 +155,7 @@ def convolve(
         ir_sample_rate = int(meta["sample_rate"])
         delays = hits["delays_seconds"]
         pressures = hits["pressures"]
+        directions = hits.get("directions", None)
     except (KeyError, TypeError) as e:
         raise ValueError(f"ir_data has invalid schema: {e}") from e
 
@@ -190,23 +164,27 @@ def convolve(
             f"sample rate mismatch - audio: {sample_rate} Hz, IR: {ir_sample_rate} Hz"
         )
 
-    ir = build_impulse_response(delays, pressures, sample_rate)
+    if directions is None:
 
-    if material is not None:
-        ir = apply_material_absorption(ir, sample_rate, material, mean_free_path_s)
+        ir = build_impulse_response(delays, pressures, sample_rate)
 
-    if dry_audio.ndim == 1:
-        wet = signal.oaconvolve(dry_audio, ir, mode="full")
-    elif dry_audio.ndim == 2:
-        channels = [
-            signal.oaconvolve(dry_audio[:, c], ir, mode="full")
-            for c in range(dry_audio.shape[1])
-        ]
-        wet = np.stack(channels, axis=1)
+        if dry_audio.ndim == 1:
+            wet = signal.oaconvolve(dry_audio, ir, mode="full")
+        elif dry_audio.ndim == 2:
+            channels = [
+                signal.oaconvolve(dry_audio[:, c], ir, mode="full")
+                for c in range(dry_audio.shape[1])
+            ]
+            wet = np.stack(channels, axis=1)
+        else:
+            raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+
+        return wet.astype(np.float32)
+
     else:
-        raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+        # Binaural convolution mit Richtungen
+        return convolve_binaural(dry_audio, sample_rate, delays, pressures, directions)
 
-    return wet.astype(np.float32)
 
 
 if __name__ == "__main__":
@@ -221,6 +199,11 @@ if __name__ == "__main__":
         "hits": {
             "delays_seconds": [0.0, 0.05, 0.12],
             "pressures": [1.0, 0.6, 0.3],
+            "directions": [                                       
+                [1, 0, 0],
+                [0, 1, 0],
+                [-1, 0, 0]
+            ],
         },
     }
     duration_s = 1.0
@@ -234,30 +217,3 @@ if __name__ == "__main__":
     print(f"wet peak:   {np.max(np.abs(wet)):.4f} (unnormalisiert)")
     print(f"wet dtype:  {wet.dtype}")
     print("sanity check ok.")
-
-    # Material-Check: dichte IR ueber 0.5s, viele Reflexionen.
-    rng = np.random.default_rng(0)
-    n_taps = 2000
-    dense_ir = {
-        "metadata": {"sample_rate": sample_rate, "rays_cast": 1, "rays_received": n_taps, "room_name": "Dense"},
-        "hits": {
-            "delays_seconds": rng.uniform(0.0, 0.5, n_taps).tolist(),
-            "pressures": rng.uniform(0.1, 1.0, n_taps).tolist(),
-        },
-    }
-    ir_raw = build_impulse_response(
-        dense_ir["hits"]["delays_seconds"], dense_ir["hits"]["pressures"], sample_rate
-    )
-    nyq = sample_rate / 2.0
-
-    def hf_ratio(x: np.ndarray) -> float:
-        sos = signal.butter(4, 2000 / nyq, btype="highpass", output="sos")
-        hf = signal.sosfiltfilt(sos, x)
-        return float(np.sum(hf**2) / np.sum(x**2))
-
-    carpet = apply_material_absorption(ir_raw, sample_rate, "carpet")
-    concrete = apply_material_absorption(ir_raw, sample_rate, "concrete")
-    r_carpet, r_concrete = hf_ratio(carpet), hf_ratio(concrete)
-    print(f"HF-Anteil  Teppich: {r_carpet:.4f}   Beton: {r_concrete:.4f}")
-    assert r_carpet < r_concrete, "Teppich muss Hoehen staerker schlucken als Beton"
-    print("material absorption check ok.")

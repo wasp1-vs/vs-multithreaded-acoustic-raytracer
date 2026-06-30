@@ -158,7 +158,7 @@ fn main() {
 
  
     // Jetzt übergeben wir room als Vec<Triangle>.
-    let (delays_par, pressures_par) =
+    let (delays_par, pressures_par, directions_par) =
         simulation::run_simulation_parallel(&test_config, &room);
 
     let duration_parallel = start_parallel.elapsed().as_secs_f32();
@@ -166,7 +166,7 @@ fn main() {
     println!("Simulation run time: {} s", duration_parallel);
 
     // Ergebnisse als ir_output.json exportieren.
-    export::export_results(delays_par, pressures_par, &test_config);
+    export::export_results(delays_par, pressures_par, directions_par, &test_config);
 
 
     // Einige Rays für Visualisierung exportieren.

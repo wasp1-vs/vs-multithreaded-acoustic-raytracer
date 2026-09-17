@@ -20,6 +20,8 @@ ray_hits.push((
 ));
 \end{lstlisting}
 
+Entscheidend ist dabei nicht die Länge des Vektors, sondern seine Orientierung im Raum. Diese Orientierung wird später in Python zur Auswahl der passenden HRTF-Messung verwendet.
+
 Da die Simulation parallel arbeitet, wird diese zusätzliche Information zusammen mit den Delay- und Pressure-Werten gesammelt. Auch der JSON-Export wurde entsprechend erweitert, sodass \texttt{ir\_output.json} neben \texttt{delays\_seconds} und \texttt{pressures} auch eine Liste \texttt{directions} enthält. Diese gerichtete Impulsantwort bildet die Grundlage für die HRTF-Verarbeitung in Python.
 
 \subsection{HRTF als Grundlage räumlicher Wahrnehmung}
@@ -27,7 +29,7 @@ Da die Simulation parallel arbeitet, wird diese zusätzliche Information zusamme
 
 Für die binaurale Wiedergabe wird eine HRTF-Datenbank verwendet. HRTF steht für \textit{Head-Related Transfer Function} und beschreibt, wie ein eintreffender Schall durch Kopf, Ohrmuscheln und Oberkörper abhängig von seiner Richtung verändert wird. Diese Filtereffekte sind entscheidend dafür, dass Menschen Schallquellen räumlich lokalisieren können \parencite{vorlaender2008}.
 
-In der Implementierung wird eine SOFA-Datei aus der CIPIC-Datenbank \parencite{algazi2001} verwendet, beispielsweise \texttt{subject\_003.sofa}. SOFA ist ein standardisiertes Format für räumliche Audiodaten \parencite{aes69}. Die Klasse \texttt{HRTFDatabase} lädt daraus die Messpositionen und die dazugehörigen HRIRs. HRIR steht für \textit{Head-Related Impulse Response} und bezeichnet die Impulsantworten für linkes und rechtes Ohr zu einer bestimmten Einfallsrichtung.
+Für die HRTF-Verarbeitung wird eine im SOFA-Format vorliegende HRTF-Messung aus der CIPIC-Datenbank \parencite{algazi2001,sofa_cipic_06} verwendet, beispielsweise \texttt{subject\_003.sofa}. SOFA ist ein standardisiertes Format für räumliche Audiodaten \parencite{aes69}. Die Klasse \texttt{HRTFDatabase} lädt daraus die Messpositionen und die dazugehörigen HRIRs mithilfe von \texttt{pysofaconventions} \parencite{pysofaconventions}. HRIR steht für \textit{Head-Related Impulse Response} und bezeichnet die Impulsantworten für linkes und rechtes Ohr zu einer bestimmten Einfallsrichtung.
 
 Für jede simulierte Reflexion wird aus dem Richtungsvektor zunächst ein Winkelpaar aus Azimut und Elevation berechnet. Der Azimut beschreibt die horizontale Richtung, also vorne, links, rechts oder hinten. Die Elevation beschreibt die vertikale Richtung, also oben oder unten. Anhand dieser Winkel wird anschließend der nächstgelegene Messpunkt in der HRTF-Datenbank ausgewählt.
 
@@ -36,14 +38,69 @@ az, el = vector_to_az_el(direction)
 hrir_l, hrir_r = hrtf_db.get_closest_hrir(az, el)
 \end{lstlisting}
 
-Diese Version verwendet dafür eine einfache Nearest-Neighbor-Auswahl. Das bedeutet, dass nicht zwischen Messpunkten interpoliert wird, sondern immer die nächstgelegene vorhandene HRIR genutzt wird. Dadurch bleibt die Implementierung robust und leicht nachvollziehbar.
+Diese Version verwendet dafür eine einfache Nearest-Neighbor-Auswahl. Das bedeutet, dass nicht zwischen Messpunkten interpoliert wird, sondern immer die nächstgelegene vorhandene HRIR genutzt wird. In der aktuellen Implementierung wird bewusst keine Interpolation zwischen benachbarten Messpunkten durchgeführt. Stattdessen wird die HRIR des geometrisch nächstgelegenen Messpunkts verwendet. Dadurch bleibt die Verarbeitung vergleichsweise einfach und reproduzierbar. Für das Projekt war dieser Ansatz ausreichend, da zunächst die grundsätzliche Integration echter HRTF-Daten in die bestehende Raytracing-Pipeline im Vordergrund stand.
 
 \subsection{Binaurale Faltung}
 \label{subsec:binaural_convolution_hrtf}
 
 Die HRTF-basierte Faltung erfolgt in der Klasse \texttt{BinauralConvolver}. Für jeden Ray-Hit wird anhand seiner Einfallsrichtung eine passende HRIR für das linke und rechte Ohr gewählt. Der Delay-Wert bestimmt, an welcher Stelle diese HRIR in die binaurale Impulsantwort eingesetzt wird. Der Pressure-Wert skaliert die Stärke der Reflexion.
 
-Dadurch wird jede Reflexion nicht nur zeitlich verzögert und abgeschwächt, sondern zusätzlich durch einen richtungsabhängigen Ohrfilter geprägt. Aus allen Ray-Hits entsteht eine zweikanalige binaurale Impulsantwort. Diese wird anschließend mit dem trockenen Eingangssignal gefaltet:
+Dadurch wird jede Reflexion nicht nur zeitlich verzögert und abgeschwächt, sondern zusätzlich durch einen richtungsabhängigen Ohrfilter geprägt. Aus allen Ray-Hits entsteht eine zweikanalige binaurale Impulsantwort. Die folgende Abbildung zeigt diesen Vorgang für einen einzelnen Treffer: Die passende HRIR wird an der Delay-Position in den linken und rechten Kanal eingesetzt.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.95\textwidth}{!}{%
+\begin{tikzpicture}[
+    >=Latex,
+    block/.style={draw, rounded corners, align=center, minimum width=3.2cm, minimum height=1.0cm, fill=gray!10},
+    hrir/.style={draw, rounded corners, align=center, minimum width=3.0cm, minimum height=0.9cm, fill=blue!10},
+    arrow/.style={->, thick},
+    timeline/.style={thick}
+]
+
+% top process - noch weiter auseinandergezogen
+\node[block] (hit) at (0,2.5) {Ray-Hit\\\texttt{direction}};
+\node[block] (lookup) at (6.2,2.5) {HRTF\\Lookup};
+\node[hrir] (hrir) at (12.2,2.5) {HRIR L/R};
+
+% arrows with more spacing
+\draw[arrow] (hit) -- node[above=7pt, font=\small, midway]{Azimut / Elevation} (lookup);
+\draw[arrow] (lookup) -- node[above=7pt, font=\small, midway]{nächster Messpunkt} (hrir);
+
+% timelines
+\node[align=right] at (-0.7,0.7) {IR links};
+\node[align=right] at (-0.7,0.0) {IR rechts};
+
+\draw[timeline] (0,0.7) -- (13.4,0.7);
+\draw[timeline] (0,0.0) -- (13.4,0.0);
+
+% delay marker
+\draw[dashed] (5.4,-0.3) -- (5.4,1.25);
+\node[font=\small] at (5.4,-0.6) {\texttt{delay}};
+
+% inserted HRIR samples left
+\foreach \x/\h in {5.4/0.25,5.85/0.45,6.3/0.3,6.75/0.15,7.2/0.08} {
+    \draw[fill=blue!35] (\x,0.7) rectangle ++(0.32,\h);
+}
+
+% inserted HRIR samples right
+\foreach \x/\h in {5.4/0.12,5.85/0.25,6.3/0.42,6.75/0.28,7.2/0.1} {
+    \draw[fill=red!35] (\x,0.0) rectangle ++(0.32,\h);
+}
+
+% smoother arrow from HRIR to inserted IR area
+\draw[arrow] (hrir.south) .. controls (12.2,1.35) and (8.5,1.45) .. (6.4,0.98);
+
+\node[font=\small, align=center] at (10.0,-0.6)
+{HRIR wird mit \texttt{pressure} skaliert\\und bei \texttt{delay} eingefügt};
+
+\end{tikzpicture}%
+}
+\caption{Einfügen einer passenden HRIR in die binaurale Impulsantwort.}
+\label{fig:hrir_insert}
+\end{figure}
+
+Diese binaurale Impulsantwort wird anschließend mit dem trockenen Eingangssignal gefaltet. Die Implementierung nutzt hierfür \texttt{scipy.signal.oaconvolve} \parencite{virtanen2020,scipy_oaconvolve}:
 
 \begin{lstlisting}
 out_l = signal.oaconvolve(dry_audio, binaural_ir[:, 0], mode="full")
@@ -51,7 +108,7 @@ out_r = signal.oaconvolve(dry_audio, binaural_ir[:, 1], mode="full")
 wet = np.stack([out_l, out_r], axis=1)
 \end{lstlisting}
 
-Das Ergebnis ist eine Stereo-WAV-Datei. Über Kopfhörer kann diese Datei als räumliches Echo bzw. räumlicher Nachhall wahrgenommen werden.
+Das Ergebnis ist eine Stereo-WAV-Datei. Über Kopfhörer kann diese Datei als simuliertes, räumliches Echo wahrgenommen werden.
 
 \subsection{Integration und Ergebnis}
 \label{subsec:hrtf_integration_result}
@@ -60,4 +117,4 @@ Die Integration erfolgt in der bestehenden Python-Pipeline. Nach dem Start der R
 
 Der entscheidende Unterschied zu einfachem Stereo-Panning besteht darin, dass HRTF nicht nur Lautstärkeunterschiede zwischen linkem und rechtem Kanal erzeugt. Stattdessen werden frequenzabhängige Filtereffekte berücksichtigt, die beim realen Hören durch Kopf und Ohrmuscheln entstehen. Dadurch können Reflexionen über Kopfhörer räumlich differenzierter wahrgenommen werden.
 
-Die Erweiterung macht aus der klassischen Impulsantwort eine gerichtete binaurale Impulsantwort. Damit wird das simulierte Echo nicht nur zeitlich und energetisch, sondern auch räumlich wiedergegeben.
+Die Erweiterung macht aus der klassischen Impulsantwort eine gerichtete binaurale Impulsantwort. Damit wird das simulierte Echo nicht nur mit korrekter Verzögerung und Lautstärke, sondern auch räumlich wiedergegeben.
